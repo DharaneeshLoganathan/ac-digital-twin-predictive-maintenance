@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+ENV/
+env/
+.venv/
+
+# Environment Variables & Local Config
+.env
+telegram_config.json
+
+# Local Databases & Logs
+*.db
+*.sqlite3
+*.log
+ac_telemetry.csv
+ac_telemetry.db
+
+# Large raw datasets (generated on demand via generate_100k_dataset.py)
+ac_realistic_twin_dataset*.csv
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini

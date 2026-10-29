@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AC Digital Twin | Predictive Maintenance & Fault Diagnostics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @keyframes fan-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .fan-running { animation: fan-spin 1.1s linear infinite; }
+        @keyframes airflow { 
+            0% { opacity: 0.2; transform: translateY(-4px); } 
+            50% { opacity: 0.9; transform: translateY(4px); } 
+            100% { opacity: 0.2; transform: translateY(-4px); } 
+        }
+        .airflow-wave { animation: airflow 1.8s ease-in-out infinite; }
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+            50% { box-shadow: 0 0 35px rgba(239, 68, 68, 0.8); }
+        }
+        .pulse-critical { animation: pulse-glow 1.2s infinite; }
+        .glass-card {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(51, 65, 85, 0.6);
+        }
+    </style>
+</head>
+<body class="bg-[#070b14] text-slate-100 font-sans min-h-screen selection:bg-cyan-500 selection:text-white">
+
+    <!-- Top Glow Line -->
+    <div id="topGlowLine" class="h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-500"></div>
+
+    <!-- Navigation Bar -->
+    <header class="border-b border-slate-800/80 bg-slate-950/90 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3.5">
+                <div class="p-3 bg-gradient-to-br from-cyan-500/20 to-blue-500/10 border border-cyan-500/40 rounded-2xl text-cyan-400 shadow-lg shadow-cyan-500/10">
+                    <i data-lucide="cpu" class="w-7 h-7"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h1 class="text-xl sm:text-2xl font-black tracking-tight bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-300 bg-clip-text text-transparent">
+                            DIGITAL TWIN OF AIR CONDITIONER
+                        </h1>
+                    </div>
+                    <p class="text-xs text-slate-400">Real-Time Telemetry, Fault Localization & Predictive Maintenance</p>
+                </div>
+            </div>
+
+            <!-- Header Action Controls -->
+            <div class="flex flex-wrap items-center gap-3">
+                <!-- Telegram Alert Config Button -->
+                <button onclick="openTelegramModal()" class="flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white shadow-lg transition-all border border-sky-400/40">
+                    <i data-lucide="bell" class="w-3.5 h-3.5"></i>
+                    <span>Telegram Alerts</span>
+                    <span id="tgHeaderDot" class="w-2 h-2 rounded-full bg-slate-400"></span>
+                </button>
+
+                <!-- Playback Demo Button -->
+                <button id="replayBtn" onclick="toggleReplay()" class="flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg transition-all border border-indigo-400/40">
+                    <i id="replayIcon" data-lucide="play" class="w-3.5 h-3.5"></i>
+                    <span id="replayBtnText">Play Prototype Dataset</span>
+                </button>
+
+                <!-- Data Source / ESP32 Status Pill -->
+                <div id="espStatusBadge" class="flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                    <span id="espStatusDot" class="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+                    <span id="espStatusText">CHECKING CONNECTION...</span>
+                </div>
+                
+                <div class="text-xs text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800" id="livePingText">
+                    Ping: --
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- OFFLINE ALARM BANNER (Visible when ESP32 is Disconnected) -->
+    <div id="offlineAlarmBanner" class="max-w-7xl mx-auto px-4 sm:px-6 pt-4">
+        <div class="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xl">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-rose-500/20 rounded-xl text-rose-400 animate-pulse">
+                    <i data-lucide="wifi-off" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h4 class="font-extrabold text-sm text-rose-200">HARDWARE SENSORS & SMART PLUG OFFLINE</h4>
+                    <p class="text-xs text-rose-300/80">Physical sensors and 16A Smart Plug are disconnected. Showing explicit "NOT CONNECTED" status on offline channels. Prototype replay and manual test deck are active below.</p>
+                </div>
+            </div>
+            <span class="px-3 py-1 bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs font-bold rounded-lg uppercase">
+                Awaiting Signal
+            </span>
+        </div>
+    </div>
+
+    <!-- LIVE HARDWARE ACTIVE BANNER (Visible when ESP32 is Connected) -->
+    <div id="hardwareLiveBanner" class="hidden max-w-7xl mx-auto px-4 sm:px-6 pt-4">
+        <div class="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 flex items-center justify-between shadow-xl">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-emerald-500/20 rounded-xl text-emerald-400">
+                    <i data-lucide="check-circle-2" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h4 class="font-extrabold text-sm text-emerald-200">REAL HARDWARE SENSORS & 16A SMART PLUG ONLINE</h4>
+                    <p class="text-xs text-emerald-300/80">Streaming live physical data from ESP32 & Smart Plug. Any individual sensor that gets disconnected is immediately flagged as NOT CONNECTED.</p>
+                </div>
+            </div>
+            <span class="px-3 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold rounded-lg uppercase">
+                Live Stream Active
+            </span>
+        </div>
+    </div>
+
+    <!-- Main Dashboard Body -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+        <!-- ===================================================================== -->
+        <!-- 🟢 1. LIVE HARDWARE TELEMETRY PIN MONITOR (PROVES REAL SENSORS) -->
+        <!-- ===================================================================== -->
+        <div class="glass-card rounded-2xl p-4 border border-cyan-500/30 shadow-lg bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3 pb-2 border-b border-slate-800 text-xs">
+                <div class="flex items-center gap-2 font-extrabold text-cyan-400 uppercase tracking-wider">
+                    <i data-lucide="map-pin" class="w-4 h-4"></i>
+                    <span>Physical Sensor Mounting Locations & Live Telemetry (ESP32 &rarr; Mosquitto MQTT)</span>
+                </div>
+                <div class="flex items-center gap-3 text-slate-400">
+                    <span>Source: <strong id="dataSourceLabel" class="text-slate-200">WAITING</strong></span>
+                    <span>Total Frames: <strong id="packetCountLabel" class="text-cyan-400 font-mono">0</strong></span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-center text-xs">
+                <!-- Spot 1: Indoor Return Air Intake -->
+                <div class="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between hover:border-cyan-500/40 transition-colors">
+                    <div class="text-[11px] font-black text-cyan-300 uppercase tracking-wide">
+                        INDOOR RETURN AIR
+                    </div>
+                    <span class="text-[9px] text-slate-400 font-semibold mb-1">Room Intake Grille</span>
+                    <span id="rawRoomBadge" class="font-black text-slate-100 text-sm"><span id="rawRoomTemp">--</span>°C / <span id="rawRoomHum">--</span>%</span>
+                </div>
+
+                <!-- Spot 2: Outdoor Condenser Air Intake -->
+                <div class="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between hover:border-orange-500/40 transition-colors">
+                    <div class="text-[11px] font-black text-orange-300 uppercase tracking-wide">
+                        OUTDOOR CONDENSER
+                    </div>
+                    <span class="text-[9px] text-slate-400 font-semibold mb-1">Ambient Air Intake</span>
+                    <span id="rawAmbientBadge" class="font-black text-slate-100 text-sm"><span id="rawAmbientTemp">--</span>°C / <span id="rawAmbientHum">--</span>%</span>
+                </div>
+
+                <!-- Spot 3: Compressor Top Dome -->
+                <div class="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between hover:border-amber-500/40 transition-colors">
+                    <div class="text-[11px] font-black text-amber-400 uppercase tracking-wide">
+                        COMPRESSOR DOME
+                    </div>
+                    <span class="text-[9px] text-slate-400 font-semibold mb-1">Discharge Copper Pipe</span>
+                    <span id="rawCompBadge" class="font-black text-amber-400 text-sm"><span id="rawCompTemp">--</span> °C</span>
+                </div>
+
+                <!-- Spot 4: Mains Power Outlet -->
+                <div class="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between hover:border-indigo-500/40 transition-colors">
+                    <div class="text-[11px] font-black text-indigo-300 uppercase tracking-wide">
+                        MAINS POWER SOCKET
+                    </div>
+                    <span class="text-[9px] text-slate-400 font-semibold mb-1">16A Electrical Line</span>
+                    <span id="rawPowerBadge" class="font-black text-indigo-400 text-sm"><span id="rawPowerWatts">--</span> W / <span id="rawCurrentAmp">--</span> A</span>
+                </div>
+
+                <!-- Spot 5: Indoor Evaporator Filter Mesh -->
+                <div class="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between hover:border-emerald-500/40 transition-colors">
+                    <div class="text-[11px] font-black text-emerald-300 uppercase tracking-wide">
+                        INDOOR FILTER MESH
+                    </div>
+                    <span class="text-[9px] text-slate-400 font-semibold mb-1">Evaporator Dust Chamber</span>
+                    <span id="rawAQIBadge" class="font-black text-emerald-400 text-sm"><span id="rawAQI">--</span> % AQI</span>
+                </div>
+
+                <!-- Spot 6: Outdoor Chassis Base Frame -->
+                <div class="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/90 flex flex-col justify-between hover:border-teal-500/40 transition-colors">
+                    <div class="text-[11px] font-black text-teal-300 uppercase tracking-wide">
+                        OUTDOOR BASE FRAME
+                    </div>
+                    <span class="text-[9px] text-slate-400 font-semibold mb-1">Chassis Base Mount</span>
+                    <span id="rawVibBadge" class="font-black text-teal-400 text-sm"><span id="rawVibStatus">--</span></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================================================================== -->
+        <!-- 🎯 2. FAULT LOCALIZATION DECK (WHERE & WHAT THE PROBLEM IS) -->
+        <!-- ===================================================================== -->
+        <div id="localizationDeck" class="p-6 rounded-3xl border transition-all duration-500 shadow-2xl glass-card relative overflow-hidden">
+            <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 pb-4 border-b border-slate-800/80">
+                <div class="flex items-center gap-3">
+                    <div id="locIconWrapper" class="p-3 bg-slate-800 border border-slate-700 rounded-2xl text-slate-400">
+                        <i id="locIcon" data-lucide="shield-check" class="w-7 h-7"></i>
+                    </div>
+                    <div>
+                        <span class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Diagnostic Subsystem Localization</span>
+                        <h2 id="faultLocationText" class="text-xl sm:text-2xl font-black text-slate-200 tracking-tight mt-0.5">
+                            CONNECTING TO SENSORS...
+                        </h2>
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700/80 text-xs">
+                        <span class="text-slate-400">Confidence:</span>
+                        <span id="confidenceScore" class="font-bold text-cyan-400 ml-1">--%</span>
+                    </div>
+                    <div id="severityBadge" class="px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider bg-slate-800 text-slate-400 border border-slate-700">
+                        STATUS: INITIALIZING
+                    </div>
+                </div>
+            </div>
+
+            <!-- What the problem is & Root Cause -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-5 text-xs sm:text-sm">
+                <div class="p-4 rounded-2xl bg-slate-950/60 border border-slate-800/90 space-y-1.5">
+                    <div class="flex items-center gap-2 text-slate-300 font-bold">
+                        <i data-lucide="alert-circle" class="w-4 h-4 text-amber-400"></i>
+                        <span>WHAT IS HAPPENING (DIAGNOSIS):</span>
+                    </div>
+                    <p id="faultTitleText" class="text-slate-200 font-semibold text-sm">Awaiting telemetry frames...</p>
+                    <p id="rootCauseText" class="text-slate-400 leading-relaxed text-xs">Thermodynamic heat lift, Smart Plug power telemetry, and mechanical vibration calculate once packets arrive.</p>
+                </div>
+
+                <div class="p-4 rounded-2xl bg-slate-950/60 border border-slate-800/90 space-y-1.5">
+                    <div class="flex items-center gap-2 text-cyan-300 font-bold">
+                        <i data-lucide="wrench" class="w-4 h-4 text-cyan-400"></i>
+                        <span>PRESCRIPTIVE MAINTENANCE ACTION:</span>
+                    </div>
+                    <p id="prescriptiveActionText" class="text-slate-200 leading-relaxed font-medium">Verify hardware power and Wi-Fi connection.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================================================================== -->
+        <!-- 3. TOP KPI CARDS (HEALTH SCORE, RUL, FAILURE RISK, COOLING EFFICIENCY) -->
+        <!-- ===================================================================== -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            
+            <!-- Health Score -->
+            <div class="glass-card rounded-3xl p-5 relative overflow-hidden shadow-xl">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Health Score</p>
+                        <div class="flex items-baseline gap-2 mt-1">
+                            <span id="healthScoreValue" class="text-4xl font-black text-slate-400">--</span>
+                            <span id="healthScoreUnit" class="text-lg text-slate-400 font-bold">%</span>
+                        </div>
+                    </div>
+                    <div class="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400">
+                        <i data-lucide="activity" class="w-6 h-6"></i>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <div class="w-full bg-slate-800/80 rounded-full h-2.5 overflow-hidden">
+                        <div id="healthScoreBar" class="bg-slate-600 h-2.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-slate-400 mt-1.5 font-semibold">
+                        <span>0% Critical</span>
+                        <span id="healthScoreStatus" class="text-slate-400 font-bold">OFFLINE</span>
+                        <span>100% Nominal</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Estimated RUL -->
+            <div class="glass-card rounded-3xl p-5 shadow-xl">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Remaining Useful Life</p>
+                        <div class="flex items-baseline gap-2 mt-1">
+                            <span id="rulDaysValue" class="text-4xl font-black text-slate-400">--</span>
+                            <span class="text-sm text-slate-400 font-bold">Hours</span>
+                        </div>
+                    </div>
+                    <div class="p-3 bg-cyan-500/10 border border-cyan-500/20 rounded-2xl text-cyan-400">
+                        <i data-lucide="clock" class="w-6 h-6"></i>
+                    </div>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-4 flex items-center gap-1.5 font-medium">
+                    <i data-lucide="sparkles" class="w-3.5 h-3.5 text-cyan-400"></i>
+                    <span>Random Forest Degradation Regressor</span>
+                </p>
+            </div>
+
+            <!-- Failure Risk -->
+            <div class="glass-card rounded-3xl p-5 shadow-xl">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Failure Risk (ML)</p>
+                        <div class="flex items-baseline gap-2 mt-1">
+                            <span id="failureRiskValue" class="text-4xl font-black text-slate-400">--</span>
+                            <span class="text-lg text-slate-400 font-bold">%</span>
+                        </div>
+                    </div>
+                    <div class="p-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-blue-400">
+                        <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+                    </div>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-4 flex items-center gap-1.5 font-medium">
+                    <i data-lucide="brain-circuit" class="w-3.5 h-3.5 text-blue-400"></i>
+                    <span>Decision Tree Anomaly Engine</span>
+                </p>
+            </div>
+
+            <!-- Cooling Efficiency -->
+            <div class="glass-card rounded-3xl p-5 shadow-xl">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Cooling Performance</p>
+                        <div class="flex items-baseline gap-2 mt-1">
+                            <span id="coolingEffValue" class="text-4xl font-black text-slate-400">--</span>
+                            <span class="text-lg text-slate-400 font-bold">%</span>
+                        </div>
+                    </div>
+                    <div class="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-indigo-400">
+                        <i data-lucide="snowflake" class="w-6 h-6"></i>
+                    </div>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-4 flex items-center gap-1.5 font-medium">
+                    <span id="tempDeltaLabel" class="text-slate-300 font-semibold">&Delta;T: Awaiting Telemetry</span>
+                </p>
+            </div>
+        </div>
+
+        <!-- ===================================================================== -->
+        <!-- 4. 2D PHYSICAL DIGITAL TWIN VISUALIZATION -->
+        <!-- ===================================================================== -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- Indoor Evaporator Unit Card -->
+            <div class="lg:col-span-5 glass-card rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+                <div class="flex justify-between items-center mb-5 pb-3 border-b border-slate-800">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2.5 bg-blue-500/10 border border-blue-500/30 rounded-xl text-blue-400">
+                            <i data-lucide="home" class="w-5 h-5"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-extrabold text-base text-slate-100 tracking-tight">INDOOR UNIT (EVAPORATOR)</h3>
+                            <p class="text-xs text-slate-400">DHT22 #1 (GPIO 4) & MQ135 (GPIO 34)</p>
+                        </div>
+                    </div>
+                    <span id="indoorAirflowBadge" class="px-3 py-1 rounded-full text-[11px] font-extrabold bg-blue-500/20 text-blue-300 border border-blue-500/30">LOUVER ACTIVE</span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3.5 text-center">
+                        <i data-lucide="thermometer" class="w-5 h-5 text-cyan-400 mx-auto mb-1"></i>
+                        <p class="text-[10px] font-bold text-slate-400 uppercase">Room Temp</p>
+                        <p class="text-xl font-black text-slate-100 mt-1"><span id="roomTempValue">--</span> <span class="text-xs font-normal text-slate-400">°C</span></p>
+                        <span id="roomTempSubLabel" class="text-[10px] text-slate-400 font-semibold">DHT22 #1</span>
+                    </div>
+
+                    <div class="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3.5 text-center">
+                        <i data-lucide="droplets" class="w-5 h-5 text-blue-400 mx-auto mb-1"></i>
+                        <p class="text-[10px] font-bold text-slate-400 uppercase">Room Humidity</p>
+                        <p class="text-xl font-black text-slate-100 mt-1"><span id="roomHumValue">--</span> <span class="text-xs font-normal text-slate-400">%</span></p>
+                        <span id="roomHumSubLabel" class="text-[10px] text-slate-400 font-semibold">RH Level</span>
+                    </div>
+
+                    <div class="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3.5 text-center">
+                        <i data-lucide="wind" class="w-5 h-5 text-emerald-400 mx-auto mb-1"></i>
+                        <p class="text-[10px] font-bold text-slate-400 uppercase">Air Quality</p>
+                        <p class="text-xl font-black text-emerald-400 mt-1"><span id="aqiValue">--</span> <span class="text-xs font-normal text-slate-400">%</span></p>
+                        <span id="aqiStatusLabel" class="text-[10px] text-slate-400 font-bold">MQ-135 (GPIO 34)</span>
+                    </div>
+                </div>
+
+                <!-- Animated Louver Graphic -->
+                <div class="mt-5 p-4 bg-slate-950/90 border border-slate-800/90 rounded-2xl">
+                    <div class="flex justify-between text-xs text-slate-400 mb-2 font-medium">
+                        <span>Evaporator Air Circulation:</span>
+                        <span class="text-cyan-400 font-mono font-bold">Cold Air Distribution</span>
+                    </div>
+                    <div class="flex gap-2.5 justify-center py-2">
+                        <div class="w-14 h-2 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full airflow-wave"></div>
+                        <div class="w-20 h-2 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full airflow-wave" style="animation-delay: 0.3s"></div>
+                        <div class="w-14 h-2 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full airflow-wave" style="animation-delay: 0.6s"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Outdoor Condenser & Compressor Unit Card -->
+            <div id="outdoorCard" class="lg:col-span-7 glass-card rounded-3xl p-6 shadow-2xl relative overflow-hidden transition-all duration-500">
+                <div class="flex justify-between items-center mb-5 pb-3 border-b border-slate-800">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400">
+                            <i data-lucide="sun" class="w-5 h-5"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-extrabold text-base text-slate-100 tracking-tight">OUTDOOR UNIT (CONDENSER, COMPRESSOR & SENSORS)</h3>
+                            <p class="text-xs text-slate-400">DS18B20 (GPIO 5), SW-420 (GPIO 27), DHT22 #2 (GPIO 18), 16A Smart Plug</p>
+                        </div>
+                    </div>
+                    <span id="compRunningBadge" class="px-3 py-1 rounded-full text-[11px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">COMPRESSOR ACTIVE</span>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div id="compCard" class="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3.5 text-center">
+                        <i data-lucide="flame" class="w-5 h-5 text-amber-400 mx-auto mb-1"></i>
+                        <p class="text-[10px] font-bold text-slate-400 uppercase">Compressor Temp</p>
+                        <p class="text-xl font-black text-amber-400 mt-1"><span id="compTempValue">--</span> <span class="text-xs font-normal text-slate-400">°C</span></p>
+                        <span id="tempLiftDisplay" class="text-[10px] text-slate-400 font-semibold">DS18B20 (GPIO 5)</span>
+                    </div>
+
+                    <div class="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3.5 text-center">
+                        <i data-lucide="cloud-sun" class="w-5 h-5 text-orange-400 mx-auto mb-1"></i>
+                        <p class="text-[10px] font-bold text-slate-400 uppercase">Ambient Temp</p>
+                        <p class="text-xl font-black text-slate-100 mt-1"><span id="ambientTempValue">--</span> <span class="text-xs font-normal text-slate-400">°C</span></p>
+                        <span id="ambientHumLabel" class="text-[10px] text-slate-400 font-semibold">DHT22 (GPIO 18)</span>
+                    </div>
+
+                    <div id="powerCard" class="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3.5 text-center">
+                        <i data-lucide="zap" class="w-5 h-5 text-indigo-400 mx-auto mb-1"></i>
+                        <p class="text-[10px] font-bold text-slate-400 uppercase">Smart Plug Power</p>
+                        <p class="text-xl font-black text-slate-100 mt-1"><span id="powerWattsValue">--</span> <span class="text-xs font-normal text-slate-400">W</span></p>
+                        <span id="powerMetricsSub" class="text-[10px] text-indigo-400 font-bold">16A Smart Plug</span>
+                    </div>
+
+                    <div id="vibrationCard" class="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-3.5 text-center">
+                        <i data-lucide="activity" class="w-5 h-5 text-teal-400 mx-auto mb-1"></i>
+                        <p class="text-[10px] font-bold text-slate-400 uppercase">Vibration Sensor</p>
+                        <p class="text-base font-black text-slate-100 mt-1.5"><span id="vibStatusDisplay">--</span></p>
+                        <span id="vibSubLabel" class="text-[10px] text-slate-400 font-semibold">SW-420 (GPIO 27)</span>
+                    </div>
+                </div>
+
+                <div class="mt-5 p-4 bg-slate-950/90 border border-slate-800/90 rounded-2xl flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2.5 bg-cyan-500/10 rounded-xl text-cyan-400 fan-running">
+                            <i data-lucide="fan" class="w-6 h-6"></i>
+                        </div>
+                        <div>
+                            <p class="text-xs font-bold text-slate-200">Condenser Heat Rejection Blower</p>
+                            <p class="text-[11px] text-slate-400">Air Discharge Nominal</p>
+                        </div>
+                    </div>
+                    <span class="text-xs font-mono text-cyan-400 font-extrabold">RPM STABLE</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================================================================== -->
+        <!-- 5. LIVE ROLLING TIME-SERIES CHARTS -->
+        <!-- ===================================================================== -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="glass-card rounded-3xl p-5 shadow-xl">
+                <h4 class="font-bold text-sm text-slate-200 mb-4 flex items-center gap-2">
+                    <i data-lucide="trending-up" class="w-4 h-4 text-cyan-400"></i>
+                    Live Thermodynamic Trajectory (°C)
+                </h4>
+                <div class="h-64 w-full"><canvas id="tempChart"></canvas></div>
+            </div>
+
+            <div class="glass-card rounded-3xl p-5 shadow-xl">
+                <h4 class="font-bold text-sm text-slate-200 mb-4 flex items-center gap-2">
+                    <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i>
+                    Health Degradation & Air Quality (%)
+                </h4>
+                <div class="h-64 w-full"><canvas id="healthChart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- ===================================================================== -->
+        <!-- 6. INTERACTIVE VIVA SIMULATION DECK (Visible in Simulation/Offline) -->
+        <!-- ===================================================================== -->
+        <div id="simulationDeckWrapper" class="glass-card rounded-3xl p-5 border border-indigo-500/30 transition-all duration-500">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800">
+                <div class="flex items-center gap-2.5">
+                    <div class="p-2 bg-indigo-500/20 text-indigo-400 rounded-xl border border-indigo-500/30">
+                        <i data-lucide="sliders" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                        <h4 class="font-extrabold text-sm text-slate-100">Manual Multi-Fault Injection & Viva Test Deck</h4>
+                        <p class="text-[11px] text-slate-400">Drag sliders to test single/dual/triple fault permutations or click reset to stream live sensors</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2.5">
+                    <!-- Mode Indicator Pill -->
+                    <div id="simModeBadge" class="px-3 py-1 rounded-xl text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5">
+                        <span id="simModeDot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span id="simModeText">LIVE SENSOR STREAM</span>
+                    </div>
+
+                    <!-- Reset to Live Stream Button -->
+                    <button id="resetLiveBtn" onclick="resetToLive()" class="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-500/40 transition-all shadow-md">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                        <span>Reset to Live Feed</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                
+                <div class="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
+                    <div class="flex justify-between mb-1.5 font-bold">
+                        <span class="text-slate-300">Compressor Temp</span>
+                        <span id="sliderCompVal" class="text-amber-400 font-mono">48.0 °C</span>
+                    </div>
+                    <input id="sliderComp" type="range" min="30" max="95" value="48" step="0.5" class="w-full accent-amber-500 cursor-pointer" oninput="demoUpdate()">
+                </div>
+
+                <div class="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
+                    <div class="flex justify-between mb-1.5 font-bold">
+                        <span class="text-slate-300">Room Temp</span>
+                        <span id="sliderRoomVal" class="text-cyan-400 font-mono">32.0 °C</span>
+                    </div>
+                    <input id="sliderRoom" type="range" min="16" max="38" value="32" step="0.5" class="w-full accent-cyan-500 cursor-pointer" oninput="demoUpdate()">
+                </div>
+
+                <div class="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
+                    <div class="flex justify-between mb-1.5 font-bold">
+                        <span class="text-slate-300">Air Quality (AQI)</span>
+                        <span id="sliderAqiVal" class="text-emerald-400 font-mono">55 %</span>
+                    </div>
+                    <input id="sliderAqi" type="range" min="5" max="95" value="55" step="1" class="w-full accent-emerald-500 cursor-pointer" oninput="demoUpdate()">
+                </div>
+
+                <div class="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
+                    <div class="flex justify-between mb-1.5 font-bold">
+                        <span class="text-slate-300">Smart Plug Current</span>
+                        <span id="sliderCurrentVal" class="text-indigo-400 font-mono">4.50 A</span>
+                    </div>
+                    <input id="sliderCurrent" type="range" min="2.0" max="9.5" value="4.5" step="0.1" class="w-full accent-indigo-500 cursor-pointer" oninput="demoUpdate()">
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- JavaScript Application Core -->
+    <script>
+        lucide.createIcons();
+
+        // Chart.js Configuration
+        const ctxTemp = document.getElementById('tempChart').getContext('2d');
+        const tempChart = new Chart(ctxTemp, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'Compressor Temp (°C)', data: [], borderColor: '#F59E0B', backgroundColor: 'rgba(245, 158, 11, 0.08)', borderWidth: 2.5, tension: 0.3, fill: true },
+                    { label: 'Ambient Temp (°C)', data: [], borderColor: '#FB923C', borderDash: [4, 4], borderWidth: 1.5, tension: 0.3 },
+                    { label: 'Room Temp (°C)', data: [], borderColor: '#06B6D4', backgroundColor: 'rgba(6, 182, 212, 0.08)', borderWidth: 2.5, tension: 0.3, fill: true }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { grid: { color: 'rgba(30, 41, 59, 0.5)' }, ticks: { color: '#64748B', font: { size: 10 } } },
+                    y: { grid: { color: 'rgba(30, 41, 59, 0.5)' }, ticks: { color: '#64748B', font: { size: 10 } }, min: 10, max: 95 }
+                },
+                plugins: { legend: { labels: { color: '#94A3B8', boxWidth: 12 } } }
+            }
+        });
+
+        const ctxHealth = document.getElementById('healthChart').getContext('2d');
+        const healthChart = new Chart(ctxHealth, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'Health Score (%)', data: [], borderColor: '#10B981', backgroundColor: 'rgba(16, 185, 129, 0.1)', borderWidth: 2.5, tension: 0.3, fill: true },
+                    { label: 'Air Quality (%)', data: [], borderColor: '#8B5CF6', borderDash: [3, 3], borderWidth: 1.5, tension: 0.3 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { grid: { color: 'rgba(30, 41, 59, 0.5)' }, ticks: { color: '#64748B', font: { size: 10 } } },
+                    y: { grid: { color: 'rgba(30, 41, 59, 0.5)' }, ticks: { color: '#64748B', font: { size: 10 } }, min: 0, max: 100 }
+                },
+                plugins: { legend: { labels: { color: '#94A3B8', boxWidth: 12 } } }
+            }
+        });
+
+        let isReplaying = false;
+        let isManualOverrideActive = false;
+
+        async function toggleReplay() {
+            isReplaying = !isReplaying;
+            if (isReplaying) isManualOverrideActive = false;
+            const action = isReplaying ? 'start' : 'stop';
+            try {
+                await fetch('/api/replay/' + action, { method: 'POST' });
+            } catch (err) {
+                console.error("Replay error:", err);
+            }
+            fetchTelemetry();
+        }
+
+        async function fetchTelemetry() {
+            try {
+                const response = await fetch('/api/telemetry');
+                const data = await response.json();
+                const s = data.state;
+
+                isReplaying = Boolean(s.is_replaying);
+
+                // Watchdog Status UI
+                const statusBadge = document.getElementById('espStatusBadge');
+                const statusDot = document.getElementById('espStatusDot');
+                const statusText = document.getElementById('espStatusText');
+                const pingText = document.getElementById('livePingText');
+                const offlineBanner = document.getElementById('offlineAlarmBanner');
+                const liveBanner = document.getElementById('hardwareLiveBanner');
+                const replayBtn = document.getElementById('replayBtn');
+                const simDeck = document.getElementById('simulationDeckWrapper');
+
+                const isOnline = (s.esp_status === 'ONLINE');
+                const isManual = Boolean(isManualOverrideActive || s.manual_override_active);
+                const isActiveData = isOnline || isReplaying || isManual;
+
+                if (isOnline && !isReplaying && !isManual) {
+                    statusBadge.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+                    statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse';
+                    statusText.innerText = 'HARDWARE ONLINE (LIVE)';
+                    pingText.innerText = `Ping: ${s.seconds_since_ping}s ago`;
+                    
+                    if (replayBtn) replayBtn.classList.remove('hidden');
+                    if (simDeck) simDeck.classList.add('hidden');
+                    if (liveBanner) liveBanner.classList.remove('hidden');
+                    if (offlineBanner) offlineBanner.classList.add('hidden');
+                } else if (isReplaying) {
+                    statusBadge.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/40';
+                    statusDot.className = 'w-2.5 h-2.5 rounded-full bg-indigo-400 animate-pulse';
+                    statusText.innerText = 'SIMULATION PLAYBACK';
+                    pingText.innerText = `Replaying (${s.replay_index || 1}/${s.replay_total || 45})`;
+                    
+                    if (replayBtn) replayBtn.classList.remove('hidden');
+                    if (simDeck) simDeck.classList.remove('hidden');
+                    if (liveBanner) liveBanner.classList.add('hidden');
+                    if (offlineBanner) offlineBanner.classList.add('hidden');
+                } else if (isManual) {
+                    statusBadge.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-500/40';
+                    statusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400';
+                    statusText.innerText = 'MANUAL TEST OVERRIDE';
+                    pingText.innerText = `Interactive Simulation`;
+                    
+                    if (replayBtn) replayBtn.classList.remove('hidden');
+                    if (simDeck) simDeck.classList.remove('hidden');
+                    if (liveBanner) liveBanner.classList.add('hidden');
+                    if (offlineBanner) offlineBanner.classList.add('hidden');
+                } else {
+                    // Offline Mode
+                    statusBadge.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-black bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse';
+                    statusDot.className = 'w-2.5 h-2.5 rounded-full bg-rose-400 animate-ping';
+                    statusText.innerText = 'HARDWARE OFFLINE';
+                    pingText.innerText = `No Signal (${s.seconds_since_ping}s)`;
+                    
+                    if (replayBtn) replayBtn.classList.remove('hidden');
+                    if (simDeck) simDeck.classList.remove('hidden');
+                    if (liveBanner) liveBanner.classList.add('hidden');
+                    if (offlineBanner) offlineBanner.classList.remove('hidden');
+                }
+
+                // Data Source & Packet Count
+                document.getElementById('dataSourceLabel').innerText = s.data_source || 'WAITING';
+                document.getElementById('packetCountLabel').innerText = s.packets_count || 0;
+
+                // Replay Button Text
+                const replayText = document.getElementById('replayBtnText');
+                if (isReplaying) {
+                    replayBtn.className = 'flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30 animate-pulse border border-rose-400';
+                    replayText.innerText = `Replaying (${s.replay_index || 1}/${s.replay_total || 45}) - Stop`;
+                } else {
+                    replayBtn.className = 'flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg border border-indigo-400/40';
+                    replayText.innerText = 'Play Prototype Dataset';
+                }
+
+                // -------------------------------------------------------------
+                // SENSOR READOUTS & NOT CONNECTED SAFE GUARDS
+                // -------------------------------------------------------------
+                
+                // 1. DHT22 #1: Room Temp & Hum (GPIO 4)
+                const roomConn = Boolean(s.room_sensor_connected && s.room_temp !== null && s.room_temp !== undefined && !isNaN(s.room_temp) && isActiveData);
+                if (roomConn) {
+                    document.getElementById('roomTempValue').innerText = Number(s.room_temp).toFixed(1);
+                    document.getElementById('roomHumValue').innerText = s.room_hum !== null && !isNaN(s.room_hum) ? Number(s.room_hum).toFixed(0) : '--';
+                    document.getElementById('rawRoomTemp').innerText = Number(s.room_temp).toFixed(1);
+                    document.getElementById('rawRoomHum').innerText = s.room_hum !== null && !isNaN(s.room_hum) ? Number(s.room_hum).toFixed(0) : '--';
+                    document.getElementById('rawRoomBadge').className = 'font-black text-slate-100 text-sm';
+                    document.getElementById('roomTempSubLabel').innerText = 'DHT22 #1 (GPIO 4)';
+                    document.getElementById('roomTempSubLabel').className = 'text-[10px] text-slate-400 font-semibold';
+                } else {
+                    document.getElementById('roomTempValue').innerText = '--';
+                    document.getElementById('roomHumValue').innerText = '--';
+                    document.getElementById('rawRoomBadge').innerHTML = '<span class="text-amber-400 text-xs font-bold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">NOT CONNECTED</span>';
+                    document.getElementById('roomTempSubLabel').innerHTML = '<span class="text-amber-400 font-bold">NOT CONNECTED</span>';
+                }
+
+                // 2. DHT22 #2: Ambient Temp & Hum (GPIO 18)
+                const ambConn = Boolean(s.ambient_sensor_connected && s.ambient_temp !== null && s.ambient_temp !== undefined && !isNaN(s.ambient_temp) && isActiveData);
+                if (ambConn) {
+                    document.getElementById('ambientTempValue').innerText = Number(s.ambient_temp).toFixed(1);
+                    document.getElementById('rawAmbientTemp').innerText = Number(s.ambient_temp).toFixed(1);
+                    document.getElementById('rawAmbientHum').innerText = s.ambient_hum !== null && !isNaN(s.ambient_hum) ? Number(s.ambient_hum).toFixed(0) : '--';
+                    document.getElementById('rawAmbientBadge').className = 'font-black text-slate-100 text-sm';
+                    document.getElementById('ambientHumLabel').innerHTML = `Humidity: <span class="text-slate-200 font-bold">${s.ambient_hum !== null && !isNaN(s.ambient_hum) ? Number(s.ambient_hum).toFixed(0) : '--'}%</span>`;
+                } else {
+                    document.getElementById('ambientTempValue').innerText = '--';
+                    document.getElementById('rawAmbientBadge').innerHTML = '<span class="text-amber-400 text-xs font-bold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">NOT CONNECTED</span>';
+                    document.getElementById('ambientHumLabel').innerHTML = '<span class="text-amber-400 font-bold">NOT CONNECTED</span>';
+                }
+
+                // 3. DS18B20: Compressor Temp (GPIO 5)
+                const compConn = Boolean(s.comp_sensor_connected && s.comp_temp !== null && s.comp_temp !== undefined && !isNaN(s.comp_temp) && isActiveData);
+                if (compConn) {
+                    document.getElementById('compTempValue').innerText = Number(s.comp_temp).toFixed(1);
+                    document.getElementById('rawCompTemp').innerText = Number(s.comp_temp).toFixed(1);
+                    document.getElementById('rawCompBadge').className = 'font-black text-amber-400 text-sm';
+                    document.getElementById('tempLiftDisplay').innerText = s.temp_lift !== null && !isNaN(s.temp_lift) ? `Lift: +${Number(s.temp_lift).toFixed(1)}°C` : 'Lift: --';
+                    document.getElementById('tempLiftDisplay').className = 'text-[10px] text-slate-400 font-semibold';
+                } else {
+                    document.getElementById('compTempValue').innerText = '--';
+                    document.getElementById('rawCompBadge').innerHTML = '<span class="text-amber-400 text-xs font-bold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">NOT CONNECTED</span>';
+                    document.getElementById('tempLiftDisplay').innerHTML = '<span class="text-amber-400 font-bold">NOT CONNECTED (GPIO 5)</span>';
+                }
+
+                // 4. 16A Smart Plug (Voltage, Current, Power)
+                const plugConn = Boolean(s.smartplug_connected && s.power_watts !== null && s.power_watts !== undefined && !isNaN(s.power_watts) && isActiveData);
+                if (plugConn) {
+                    document.getElementById('powerWattsValue').innerText = Math.round(s.power_watts);
+                    document.getElementById('rawPowerWatts').innerText = Math.round(s.power_watts);
+                    document.getElementById('rawCurrentAmp').innerText = s.current_amp !== null && !isNaN(s.current_amp) ? Number(s.current_amp).toFixed(2) : '--';
+                    document.getElementById('rawPowerBadge').className = 'font-black text-indigo-400 text-sm';
+                    document.getElementById('powerMetricsSub').innerHTML = `<span class="text-indigo-300 font-bold">${Number(s.current_amp || 0).toFixed(2)} A</span> / <span class="text-slate-300">${Math.round(s.voltage_v || 230)} V</span>`;
+                } else {
+                    document.getElementById('powerWattsValue').innerText = '--';
+                    document.getElementById('rawPowerBadge').innerHTML = '<span class="text-amber-400 text-xs font-bold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">NOT CONNECTED</span>';
+                    document.getElementById('powerMetricsSub').innerHTML = '<span class="text-amber-400 font-bold">NOT CONNECTED</span>';
+                }
+
+                // 5. MQ135: Air Quality (GPIO 34)
+                const aqiConn = Boolean(s.aqi_sensor_connected && s.air_quality !== null && s.air_quality !== undefined && !isNaN(s.air_quality) && isActiveData);
+                if (aqiConn) {
+                    document.getElementById('aqiValue').innerText = Math.round(s.air_quality);
+                    document.getElementById('rawAQI').innerText = Math.round(s.air_quality);
+                    document.getElementById('rawAQIBadge').className = 'font-black text-emerald-400 text-sm';
+                    if (s.air_quality > 60) {
+                        document.getElementById('aqiStatusLabel').innerText = 'POOR / CLOGGED';
+                        document.getElementById('aqiStatusLabel').className = 'text-[10px] text-rose-400 font-bold';
+                    } else if (s.air_quality > 35) {
+                        document.getElementById('aqiStatusLabel').innerText = 'MODERATE';
+                        document.getElementById('aqiStatusLabel').className = 'text-[10px] text-amber-400 font-semibold';
+                    } else {
+                        document.getElementById('aqiStatusLabel').innerText = 'CLEAN AIR';
+                        document.getElementById('aqiStatusLabel').className = 'text-[10px] text-emerald-400 font-semibold';
+                    }
+                } else {
+                    document.getElementById('aqiValue').innerText = '--';
+                    document.getElementById('rawAQIBadge').innerHTML = '<span class="text-amber-400 text-xs font-bold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">NOT CONNECTED</span>';
+                    document.getElementById('aqiStatusLabel').innerHTML = '<span class="text-amber-400 font-bold">NOT CONNECTED</span>';
+                }
+
+                // 6. SW-420 Vibration Sensor (GPIO 27)
+                const vibConn = Boolean(s.vibration_sensor_connected && s.vibration && s.vibration !== 'DISCONNECTED' && isActiveData);
+                if (vibConn) {
+                    if (s.vibration === 'VIBRATION DETECTED' || s.vibration === 'DETECTED') {
+                        document.getElementById('vibStatusDisplay').innerHTML = '<span class="text-rose-400 font-black animate-pulse text-sm">SHOCK DETECTED</span>';
+                        document.getElementById('rawVibBadge').innerHTML = '<span class="text-rose-400 text-xs font-black px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 animate-pulse">SHOCK DETECTED</span>';
+                        document.getElementById('vibSubLabel').className = 'text-[10px] text-rose-400 font-bold';
+                    } else {
+                        document.getElementById('vibStatusDisplay').innerHTML = '<span class="text-emerald-400 font-black text-sm">NORMAL</span>';
+                        document.getElementById('rawVibBadge').innerHTML = '<span class="text-emerald-400 text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30">NORMAL</span>';
+                        document.getElementById('vibSubLabel').className = 'text-[10px] text-slate-400 font-semibold';
+                    }
+                } else {
+                    document.getElementById('vibStatusDisplay').innerText = '--';
+                    document.getElementById('rawVibBadge').innerHTML = '<span class="text-amber-400 text-xs font-bold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">NOT CONNECTED</span>';
+                    document.getElementById('vibSubLabel').innerHTML = '<span class="text-amber-400 font-bold">NOT CONNECTED</span>';
+                }
+
+                // -------------------------------------------------------------
+                // FAULT LOCALIZATION & KPI DECK
+                // -------------------------------------------------------------
+                document.getElementById('faultLocationText').innerText = s.fault_location || 'AWAITING TELEMETRY';
+                document.getElementById('faultLocationText').style.color = s.fault_severity_color || '#94A3B8';
+                document.getElementById('faultTitleText').innerText = s.fault_title || 'Awaiting signal...';
+                document.getElementById('rootCauseText').innerText = s.root_cause || '--';
+                document.getElementById('prescriptiveActionText').innerText = s.prescriptive_action || '--';
+                document.getElementById('confidenceScore').innerText = (s.confidence_score && s.confidence_score > 0 && isActiveData) ? s.confidence_score + '%' : '--%';
+
+                const sevBadge = document.getElementById('severityBadge');
+                sevBadge.innerText = 'STATUS: ' + (s.fault_severity || 'OFFLINE');
+                if (s.fault_severity === 'CRITICAL') {
+                    sevBadge.className = 'px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse';
+                    document.getElementById('locIconWrapper').className = 'p-3 bg-rose-500/20 border border-rose-500/40 rounded-2xl text-rose-400';
+                    document.getElementById('locIcon').setAttribute('data-lucide', 'alert-octagon');
+                } else if (s.fault_severity === 'WARNING') {
+                    sevBadge.className = 'px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40';
+                    document.getElementById('locIconWrapper').className = 'p-3 bg-amber-500/20 border border-amber-500/40 rounded-2xl text-amber-400';
+                    document.getElementById('locIcon').setAttribute('data-lucide', 'alert-triangle');
+                } else if (s.fault_severity === 'OPTIMAL') {
+                    sevBadge.className = 'px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+                    document.getElementById('locIconWrapper').className = 'p-3 bg-emerald-500/20 border border-emerald-500/40 rounded-2xl text-emerald-400';
+                    document.getElementById('locIcon').setAttribute('data-lucide', 'shield-check');
+                } else {
+                    sevBadge.className = 'px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider bg-slate-800 text-slate-400 border border-slate-700';
+                    document.getElementById('locIconWrapper').className = 'p-3 bg-slate-800 border border-slate-700 rounded-2xl text-slate-400';
+                    document.getElementById('locIcon').setAttribute('data-lucide', 'shield-check');
+                }
+
+                // KPI Updates
+                if (isActiveData && s.health_score !== null && !isNaN(s.health_score)) {
+                    document.getElementById('healthScoreValue').innerText = s.health_score;
+                    document.getElementById('healthScoreBar').style.width = s.health_score + '%';
+                    document.getElementById('healthScoreStatus').innerText = s.health_status || 'HEALTHY';
+                    document.getElementById('healthScoreValue').style.color = s.status_color || '#10B981';
+                    document.getElementById('healthScoreBar').style.backgroundColor = s.status_color || '#10B981';
+                    document.getElementById('rulDaysValue').innerText = s.rul_hours !== null ? s.rul_hours : '--';
+                    document.getElementById('failureRiskValue').innerText = s.failure_risk !== null ? s.failure_risk : '--';
+                    document.getElementById('coolingEffValue').innerText = s.cooling_efficiency !== null ? s.cooling_efficiency : '--';
+                    document.getElementById('tempDeltaLabel').innerText = s.cooling_delta !== null ? `ΔT: ${s.cooling_delta} °C (Ambient vs Room)` : `ΔT: --`;
+                } else {
+                    document.getElementById('healthScoreValue').innerText = '--';
+                    document.getElementById('healthScoreBar').style.width = '0%';
+                    document.getElementById('healthScoreStatus').innerText = 'OFFLINE';
+                    document.getElementById('healthScoreValue').style.color = '#94A3B8';
+                    document.getElementById('healthScoreBar').style.backgroundColor = '#94A3B8';
+                    document.getElementById('rulDaysValue').innerText = '--';
+                    document.getElementById('failureRiskValue').innerText = '--';
+                    document.getElementById('coolingEffValue').innerText = '--';
+                    document.getElementById('tempDeltaLabel').innerText = `ΔT: Awaiting Telemetry`;
+                }
+
+                // Live Charts
+                if (data.history && data.history.timestamps && data.history.timestamps.length > 0 && isActiveData) {
+                    tempChart.data.labels = data.history.timestamps;
+                    tempChart.data.datasets[0].data = data.history.comp_temp;
+                    tempChart.data.datasets[1].data = data.history.ambient_temp;
+                    tempChart.data.datasets[2].data = data.history.room_temp;
+                    tempChart.update('none');
+
+                    healthChart.data.labels = data.history.timestamps;
+                    healthChart.data.datasets[0].data = data.history.health_score;
+                    healthChart.data.datasets[1].data = data.history.air_quality;
+                    healthChart.update('none');
+                }
+
+                // Slider & Mode Synchronization
+                const simBadge = document.getElementById('simModeBadge');
+                const simDot = document.getElementById('simModeDot');
+                const simText = document.getElementById('simModeText');
+                const resetBtn = document.getElementById('resetLiveBtn');
+
+                if (!isManual) {
+                    if (s.comp_temp !== null && s.comp_temp > 0) {
+                        document.getElementById('sliderComp').value = s.comp_temp;
+                        document.getElementById('sliderCompVal').innerText = Number(s.comp_temp).toFixed(1) + ' °C';
+                    } else {
+                        document.getElementById('sliderCompVal').innerText = '-- (Not Connected)';
+                    }
+                    if (s.room_temp !== null && s.room_temp > 0) {
+                        document.getElementById('sliderRoom').value = s.room_temp;
+                        document.getElementById('sliderRoomVal').innerText = Number(s.room_temp).toFixed(1) + ' °C';
+                    } else {
+                        document.getElementById('sliderRoomVal').innerText = '-- (Not Connected)';
+                    }
+                    if (s.air_quality !== null && s.air_quality > 0) {
+                        document.getElementById('sliderAqi').value = Math.round(s.air_quality);
+                        document.getElementById('sliderAqiVal').innerText = Math.round(s.air_quality) + ' %';
+                    } else {
+                        document.getElementById('sliderAqiVal').innerText = '-- (Not Connected)';
+                    }
+                    if (s.current_amp !== null && s.current_amp > 0) {
+                        document.getElementById('sliderCurrent').value = s.current_amp;
+                        document.getElementById('sliderCurrentVal').innerText = Number(s.current_amp).toFixed(2) + ' A';
+                    } else {
+                        document.getElementById('sliderCurrentVal').innerText = '-- (Not Connected)';
+                    }
+                    if (simBadge) {
+                        simBadge.className = 'px-3 py-1 rounded-xl text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1.5';
+                        simDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+                        simText.innerText = 'LIVE SENSOR STREAM';
+                        resetBtn.className = 'flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-cyan-300 border border-slate-700 transition-all';
+                    }
+                } else {
+                    if (simBadge) {
+                        simBadge.className = 'px-3 py-1 rounded-xl text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1.5';
+                        simDot.className = 'w-2 h-2 rounded-full bg-amber-400';
+                        simText.innerText = 'MANUAL TEST OVERRIDE';
+                        resetBtn.className = 'flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black bg-cyan-600 hover:bg-cyan-500 text-white border border-cyan-400 transition-all shadow-lg shadow-cyan-600/30 animate-pulse';
+                    }
+                }
+
+                lucide.createIcons();
+            } catch (err) {
+                console.error("Telemetry error:", err);
+            }
+        }
+
+        function demoUpdate() {
+            isManualOverrideActive = true;
+            const comp = parseFloat(document.getElementById('sliderComp').value);
+            const room = parseFloat(document.getElementById('sliderRoom').value);
+            const aqi = parseFloat(document.getElementById('sliderAqi').value);
+            const cur = parseFloat(document.getElementById('sliderCurrent').value);
+            const amb = 34.5;
+            const pwr = Math.round(230.0 * cur * 0.92 * 10) / 10;
+            const tempLift = Math.round((comp - amb) * 10) / 10;
+            const coolDelta = Math.round((amb - room) * 10) / 10;
+            const coolEff = coolDelta > 0 ? Math.min(100, Math.max(15, Math.round((coolDelta / 8.0) * 100))) : 60;
+
+            // Instantaneous Client-Side Text and Card Updates
+            document.getElementById('sliderCompVal').innerText = comp.toFixed(1) + ' °C';
+            document.getElementById('sliderRoomVal').innerText = room.toFixed(1) + ' °C';
+            document.getElementById('sliderAqiVal').innerText = Math.round(aqi) + ' %';
+            document.getElementById('sliderCurrentVal').innerText = cur.toFixed(2) + ' A';
+
+            document.getElementById('compTempValue').innerText = comp.toFixed(1);
+            document.getElementById('roomTempValue').innerText = room.toFixed(1);
+            document.getElementById('ambientTempValue').innerText = amb.toFixed(1);
+            document.getElementById('aqiValue').innerText = Math.round(aqi);
+            document.getElementById('powerWattsValue').innerText = Math.round(pwr);
+            document.getElementById('vibStatusDisplay').innerHTML = comp >= 80.0 ? '<span class="text-rose-400 font-black animate-pulse text-sm">SHOCK DETECTED</span>' : '<span class="text-emerald-400 font-black text-sm">NORMAL</span>';
+
+            document.getElementById('tempLiftDisplay').innerText = `Lift: +${tempLift}°C`;
+            document.getElementById('coolingEffValue').innerText = coolEff;
+            document.getElementById('tempDeltaLabel').innerText = `ΔT: ${coolDelta} °C (Ambient vs Room)`;
+
+            // Frontend rule check
+            let health = 100, loc = '📍 ALL SUBSYSTEMS NOMINAL', title = 'Normal Baseline Operation', sev = 'OPTIMAL', col = '#10B981', cause = 'Thermodynamic heat lift, power consumption, and air quality are within normal operational limits.', act = 'System operating optimally. Routine preventive maintenance recommended in 180 days.', rul = 2500;
+
+            if (comp >= 85.0 && aqi >= 60.0 && cur >= 7.0) {
+                health = 10; loc = '📍 CRITICAL MULTI-POINT FAILURE: INDOOR + OUTDOOR + REFRIGERANT (3 Locations)';
+                title = 'Critical Multi-Subsystem Breakdown Alert'; sev = 'CRITICAL'; col = '#DC2626';
+                cause = 'Simultaneous breakdown across all 3 key subsystems: Extreme compressor overheat, filter blocked, high current surge.';
+                act = 'Critical multi-point failure! Shut down AC immediately. Overhaul refrigerant circuit, clean all coils, and inspect compressor windings.';
+                rul = 24;
+            } else if (comp >= 80.0 && coolDelta <= 2.5) {
+                health = 25; loc = '📍 COMPOUND FAULT: REFRIGERANT LEAK + CONDENSER FOULING (2 Locations)';
+                title = 'Severe Compressor Thermal Overload Hazard'; sev = 'CRITICAL'; col = '#EF4444';
+                cause = 'Dangerous combination: dirty condenser coil plus loss of suction gas cooling causes severe compressor overheating.';
+                act = 'Immediate attention: Clean condenser fins, repair refrigerant leak, and top up refrigerant charge to prevent compressor burn-out.';
+                rul = 48;
+            } else if (aqi >= 60.0 && comp >= 70.0) {
+                health = 35; loc = '📍 COMPOUND FAULT: INDOOR FILTER + OUTDOOR CONDENSER (2 Locations)';
+                title = 'Dual Heat Transfer Bottleneck (Indoor & Outdoor)'; sev = 'CRITICAL'; col = '#EF4444';
+                cause = 'Simultaneous indoor airflow restriction and outdoor condenser fouling causing thermal buildup.';
+                act = 'Perform dual-side maintenance: wash indoor filter mesh and chemically wash outdoor condenser heat exchanger.';
+                rul = 120;
+            } else if (comp >= 68.0 || tempLift >= 20.0 || cur >= 6.8) {
+                health = 50; loc = '📍 OUTDOOR UNIT: CONDENSER HEAT EXCHANGER (1 Location)';
+                title = 'Condenser Coil Fouling & High Head Pressure'; sev = 'WARNING'; col = '#F59E0B';
+                cause = 'Restricted condenser heat dissipation resulting in elevated discharge temperature and motor current draw.';
+                act = 'Clean outdoor condenser fins with foaming coil cleaner; verify outdoor fan exhaust airflow.';
+                rul = 220;
+            } else if (coolDelta <= 2.5 && comp >= 55.0) {
+                health = 45; loc = '📍 REFRIGERANT CIRCUIT: GAS LEAK / LOW CHARGE (1 Location)';
+                title = 'Refrigerant Undercharge / Suction Line Depletion'; sev = 'WARNING'; col = '#F59E0B';
+                cause = 'Low refrigerant mass flow rate causing complete loss of cooling capacity (collapsed ΔT).';
+                act = 'Perform electronic/bubble leak check on flare joints, seal leak, pull deep vacuum, and recharge rated R32/R410A.';
+                rul = 250;
+            } else if (cur >= 7.5) {
+                health = 60; loc = '📍 ELECTRICAL SYSTEM: MAINS GRID SAG (1 Location)';
+                title = 'Mains Grid Voltage Sag & Motor Overcurrent'; sev = 'WARNING'; col = '#F59E0B';
+                cause = 'Mains grid voltage dropped (< 205V), forcing compressor motor to draw elevated current to deliver torque.';
+                act = 'Inspect electrical distribution board; verify breaker connections and install an Automatic Voltage Stabilizer (AVS).';
+                rul = 420;
+            } else if (aqi >= 55.0) {
+                health = 60; loc = '📍 INDOOR UNIT: EVAPORATOR AIR FILTER (1 Location)';
+                title = 'Indoor Air Filter Dust Loading / Airflow Restriction'; sev = 'WARNING'; col = '#F59E0B';
+                cause = 'High particulate accumulation on nylon mesh filter causing restricted airflow velocity.';
+                act = 'Remove, wash with warm water, and thoroughly dry the indoor mesh filter.';
+                rul = 550;
+            }
+
+            document.getElementById('healthScoreValue').innerText = health;
+            document.getElementById('healthScoreBar').style.width = health + '%';
+            document.getElementById('healthScoreStatus').innerText = health >= 85 ? 'HEALTHY' : (health >= 65 ? 'GOOD' : (health >= 40 ? 'WARNING' : 'CRITICAL'));
+            document.getElementById('healthScoreValue').style.color = col;
+            document.getElementById('healthScoreBar').style.backgroundColor = col;
+            document.getElementById('rulDaysValue').innerText = rul;
+            document.getElementById('failureRiskValue').innerText = Math.round((100 - health * 0.96) * 10) / 10;
+            document.getElementById('faultLocationText').innerText = loc;
+            document.getElementById('faultLocationText').style.color = col;
+            document.getElementById('faultTitleText').innerText = title;
+            document.getElementById('rootCauseText').innerText = cause;
+            document.getElementById('prescriptiveActionText').innerText = act;
+
+            // Sync with backend
+            fetch('/api/simulate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    comp_temp: comp, 
+                    room_temp: room, 
+                    air_quality: aqi, 
+                    current_amp: cur,
+                    power_watts: pwr
+                })
+            }).catch(e => console.error(e));
+        }
+
+        async function resetToLive() {
+            isManualOverrideActive = false;
+            isReplaying = false;
+            try {
+                await fetch('/api/simulate/reset', { method: 'POST' });
+            } catch (e) {
+                console.error("Reset error:", e);
+            }
+            fetchTelemetry();
+        }
+
+        // ==========================================
+        // TELEGRAM ALERT MODAL & CONTROLS
+        // ==========================================
+        async function openTelegramModal() {
+            document.getElementById('telegramModal').classList.remove('hidden');
+            try {
+                const res = await fetch('/api/telegram/config');
+                const data = await res.json();
+                if (data.bot_token && data.bot_token !== 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
+                    document.getElementById('tgBotToken').value = data.bot_token;
+                }
+                if (data.chat_id && data.chat_id !== 'YOUR_TELEGRAM_CHAT_ID_HERE') {
+                    document.getElementById('tgChatId').value = data.chat_id;
+                }
+                document.getElementById('tgEnableToggle').checked = data.enabled !== false;
+                updateTgStatusBadge(data.is_configured);
+            } catch (e) {
+                console.log("Could not load Telegram config:", e);
+            }
+        }
+
+        function closeTelegramModal() {
+            document.getElementById('telegramModal').classList.add('hidden');
+        }
+
+        function updateTgStatusBadge(isConfigured) {
+            const dot = document.getElementById('tgHeaderDot');
+            const badge = document.getElementById('tgModalStatus');
+            if (isConfigured) {
+                dot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+                if (badge) {
+                    badge.innerText = 'ACTIVE & CONNECTED';
+                    badge.className = 'text-xs font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/30';
+                }
+            } else {
+                dot.className = 'w-2 h-2 rounded-full bg-slate-400';
+                if (badge) {
+                    badge.innerText = 'NOT CONFIGURED';
+                    badge.className = 'text-xs font-bold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/30';
+                }
+            }
+        }
+
+        async function saveTelegramConfig() {
+            const token = document.getElementById('tgBotToken').value.trim();
+            const chatId = document.getElementById('tgChatId').value.trim();
+            const enabled = document.getElementById('tgEnableToggle').checked;
+            const resMsg = document.getElementById('tgResultMsg');
+
+            resMsg.innerText = 'Saving configuration...';
+            resMsg.className = 'text-xs text-sky-400 block mt-2';
+
+            try {
+                const res = await fetch('/api/telegram/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bot_token: token, chat_id: chatId, enabled: enabled })
+                });
+                const data = await res.json();
+                resMsg.innerText = '✅ Saved! You can now send a test alert.';
+                resMsg.className = 'text-xs text-emerald-400 block mt-2';
+                updateTgStatusBadge(token.length > 5 && chatId.length > 2);
+            } catch (e) {
+                resMsg.innerText = '❌ Error saving: ' + e;
+                resMsg.className = 'text-xs text-rose-400 block mt-2';
+            }
+        }
+
+        async function sendTestTelegramAlert() {
+            const resMsg = document.getElementById('tgResultMsg');
+            resMsg.innerText = '📤 Dispatching test alert to Telegram...';
+            resMsg.className = 'text-xs text-sky-400 block mt-2';
+
+            try {
+                const res = await fetch('/api/telegram/test', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    resMsg.innerText = '🎉 ' + data.message + ' Check your Telegram!';
+                    resMsg.className = 'text-xs text-emerald-400 block mt-2 font-bold';
+                } else {
+                    resMsg.innerText = '⚠️ ' + data.message;
+                    resMsg.className = 'text-xs text-rose-400 block mt-2';
+                }
+            } catch (e) {
+                resMsg.innerText = '❌ Error: ' + e;
+                resMsg.className = 'text-xs text-rose-400 block mt-2';
+            }
+        }
+
+        // Check initial telegram status
+        fetch('/api/telegram/config')
+            .then(r => r.json())
+            .then(d => updateTgStatusBadge(d.is_configured))
+            .catch(() => {});
+
+        setInterval(fetchTelemetry, 1000);
+        fetchTelemetry();
+    </script>
+
+    <!-- TELEGRAM CONFIGURATION MODAL -->
+    <div id="telegramModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+        <div class="glass-card max-w-lg w-full rounded-2xl p-6 border border-sky-500/40 shadow-2xl space-y-4 relative animate-in fade-in zoom-in duration-200">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div class="flex items-center gap-3">
+                    <div class="p-2.5 bg-sky-500/20 text-sky-400 rounded-xl border border-sky-500/40">
+                        <i data-lucide="send" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-extrabold text-white">Telegram Bot Alert Dispatcher</h3>
+                        <p class="text-xs text-slate-400">Receive instant push notifications for critical AC faults</p>
+                    </div>
+                </div>
+                <button onclick="closeTelegramModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div class="flex items-center justify-between p-3 bg-slate-900/80 rounded-xl border border-slate-800">
+                <span class="text-xs text-slate-300">Bot Service Status</span>
+                <span id="tgModalStatus" class="text-xs font-bold text-slate-400">CHECKING...</span>
+            </div>
+
+            <div class="space-y-3 text-xs">
+                <div>
+                    <label class="block font-bold text-slate-300 mb-1">Telegram Bot Token</label>
+                    <input id="tgBotToken" type="text" placeholder="e.g. 7123456789:AAHq_xyzABC12345..." class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-100 font-mono focus:border-sky-500 focus:outline-none">
+                    <p class="text-[10px] text-slate-500 mt-1">Obtain from <span class="text-sky-400">@BotFather</span> in Telegram by creating a new bot.</p>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-300 mb-1">Target Chat ID / Group ID</label>
+                    <input id="tgChatId" type="text" placeholder="e.g. 123456789 or -100123456789" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-slate-100 font-mono focus:border-sky-500 focus:outline-none">
+                    <p class="text-[10px] text-slate-500 mt-1">Get your personal Chat ID from <span class="text-sky-400">@userinfobot</span> or group ID from <span class="text-sky-400">@RawDataBot</span>.</p>
+                </div>
+
+                <div class="flex items-center justify-between pt-1">
+                    <label class="text-xs text-slate-300 font-semibold">Enable Automated Push Alerts</label>
+                    <input id="tgEnableToggle" type="checkbox" checked class="w-4 h-4 accent-sky-500 rounded">
+                </div>
+
+                <div id="tgResultMsg" class="hidden text-xs"></div>
+            </div>
+
+            <div class="flex items-center justify-between pt-3 border-t border-slate-800 gap-2">
+                <button onclick="sendTestTelegramAlert()" class="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 flex items-center gap-1.5 transition-all">
+                    <i data-lucide="zap" class="w-3.5 h-3.5"></i>
+                    <span>Send Test Alert</span>
+                </button>
+                <div class="flex items-center gap-2">
+                    <button onclick="closeTelegramModal()" class="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white">
+                        Cancel
+                    </button>
+                    <button onclick="saveTelegramConfig()" class="px-4 py-2 rounded-xl text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white shadow-lg shadow-sky-600/30 border border-sky-400">
+                        Save Credentials
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
