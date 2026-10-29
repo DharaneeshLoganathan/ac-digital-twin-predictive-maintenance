@@ -4,7 +4,7 @@
 [![ESP32](https://img.shields.io/badge/Hardware-ESP32%20IoT-red.svg)](https://www.espressif.com/)
 [![MQTT](https://img.shields.io/badge/Protocol-MQTT%20Mosquitto-orange.svg)](https://mosquitto.org/)
 [![Scikit-Learn](https://img.shields.io/badge/ML-DecisionTree%20%26%20RandomForest-green.svg)](https://scikit-learn.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 
 An end-to-end Cyber-Physical Digital Twin system designed for real-time condition monitoring, automated fault classification, and Remaining Useful Life (RUL) prognostics of residential and commercial air conditioning systems.
 
