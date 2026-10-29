@@ -53,7 +53,7 @@ An end-to-end Cyber-Physical Digital Twin system designed for real-time conditio
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/maddan23032005/ac-digital-twin-predictive-maintenance.git
+git clone https://github.com/DharaneeshLoganathan/ac-digital-twin-predictive-maintenance.git
 cd ac-digital-twin-predictive-maintenance
 ```
 
